@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Secrets and local env — never commit real keys (templates below are allowed)
+.env*
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+!frontend/.env.production
+!frontend/.env.preview-local
+
+# Firebase service account keys
+firebase-service-account.json
+**/firebase-service-account.json
+*-firebase-adminsdk-*.json
+*-service-account*.json
+
+# Build output & tooling
+dist/
+coverage/
+frontend/.vite/
+*.log
+logs/
+
+# OS / editor
+.DS_Store
