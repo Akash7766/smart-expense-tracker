@@ -155,7 +155,7 @@ Rules:
    * Call Gemini API with retry logic
    */
   async callGeminiAPI(prompt, attempt = 1) {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
     if (!apiKey) throw new AppError('AI service is not configured', 503);
 
     try {

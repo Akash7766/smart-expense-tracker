@@ -1,4 +1,3 @@
-const { URL } = require('node:url');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -19,7 +18,7 @@ const allowedOrigins = getAllowedOrigins();
 // Security middleware
 app.use(helmet());
 
-// CORS — production: ALLOWED_ORIGINS / FRONTEND_URL only. Non-production: loopback (localhost / 127.0.0.1:any port) allowed so `vite preview` can hop ports without env churn.
+// CORS — only origins listed in ALLOWED_ORIGINS (comma-separated). Unknown origins rejected.
 app.use(
   cors({
     credentials: true,
@@ -30,25 +29,8 @@ app.use(
         return callback(null, true);
       }
 
-      const isProd = process.env.NODE_ENV === 'production';
-      if (!isProd) {
-        try {
-          const { hostname } = new URL(origin);
-          if (hostname === 'localhost' || hostname === '127.0.0.1') {
-            return callback(null, true);
-          }
-        } catch {
-          /* ignore invalid origin URL */
-        }
-      }
-
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
-      }
-
-      if (allowedOrigins.length === 0 && isProd) {
-        logger.warn('CORS allowlist is empty in production — rejecting browser origin');
-        return callback(null, false);
       }
 
       logger.warn(`CORS rejected origin: ${origin}`);
@@ -83,6 +65,14 @@ app.get('/health', (req, res) => {
     message: 'Smart Expense Tracker API is running',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV,
+  });
+});
+
+// Basic API root health route
+app.get('/api', (req, res) => {
+  res.status(200).json({
+    status: 'success',
+    message: 'API is running',
   });
 });
 

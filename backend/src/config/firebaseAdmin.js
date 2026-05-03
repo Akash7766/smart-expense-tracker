@@ -3,19 +3,12 @@ const path = require('path');
 const admin = require('firebase-admin');
 const logger = require('../utils/logger');
 
-/** Directory containing this file: backend/src/config */
 const CONFIG_DIR = __dirname;
-/** Backend package root (contains firebase-service-account.json, package.json, .env) */
 const BACKEND_ROOT = path.resolve(CONFIG_DIR, '..', '..');
-/** Monorepo root (parent of backend/) — supports paths like backend/firebase-service-account.json */
 const MONOREPO_ROOT = path.resolve(BACKEND_ROOT, '..');
 
 let initialized = false;
 
-/**
- * Resolve a relative credential path without using process.cwd().
- * Tries, in order: backend root, path relative to this module's dir, monorepo root.
- */
 function resolveCredentialFilePath(relOrAbs) {
   const trimmed = String(relOrAbs).trim();
   if (!trimmed) return { resolved: null, candidates: [] };
@@ -39,33 +32,48 @@ function resolveCredentialFilePath(relOrAbs) {
   return { resolved: path.normalize(path.resolve(BACKEND_ROOT, trimmed)), candidates };
 }
 
-function parseServiceAccountJson(raw, label) {
+/**
+ * Parse service account JSON from env; normalize escaped newlines in private_key (common in Render secrets).
+ * @param {string} raw
+ * @param {string} label
+ * @param {{ throwOnError: boolean }} opts
+ */
+function parseServiceAccountFromString(raw, label, opts = { throwOnError: false }) {
+  const throwOnError = opts.throwOnError === true;
+  if (!raw || !String(raw).trim()) {
+    const msg = `${label} is missing or empty`;
+    if (throwOnError) throw new Error(msg);
+    return null;
+  }
+
+  let parsed;
   try {
-    return JSON.parse(String(raw).trim());
+    parsed = JSON.parse(String(raw).trim());
   } catch (err) {
-    logger.error(`${label}: invalid JSON — ${err.message}`);
-    throw err;
+    const msg = `${label} is not valid JSON: ${err.message}`;
+    if (throwOnError) throw new Error(msg, { cause: err });
+    logger.error(msg);
+    return null;
   }
-}
 
-function validateServiceAccountShape(parsed, label) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    const msg = `${label} must be a JSON object`;
+    if (throwOnError) throw new Error(msg);
+    logger.error(msg);
+    return null;
+  }
+
+  if (parsed.private_key != null) {
+    parsed.private_key = String(parsed.private_key).replace(/\\n/g, '\n');
+  }
+
   if (!parsed.private_key || !parsed.client_email || !parsed.project_id) {
-    logger.error(
-      `${label}: service account JSON must include private_key, client_email, and project_id`
-    );
-    return false;
+    const msg = `${label} must include private_key, client_email, and project_id`;
+    if (throwOnError) throw new Error(msg);
+    logger.error(msg);
+    return null;
   }
-  return true;
-}
 
-function loadCredentialFromEnvJson() {
-  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-  if (!raw || !String(raw).trim()) return null;
-
-  const parsed = parseServiceAccountJson(raw, 'FIREBASE_SERVICE_ACCOUNT_JSON');
-  if (!validateServiceAccountShape(parsed, 'FIREBASE_SERVICE_ACCOUNT_JSON')) return null;
-
-  logger.info('Firebase Admin credential source: FIREBASE_SERVICE_ACCOUNT_JSON (environment)');
   return parsed;
 }
 
@@ -78,8 +86,8 @@ function loadCredentialFromPath() {
 
   if (!fs.existsSync(resolved)) {
     logger.error(
-      `FIREBASE_SERVICE_ACCOUNT_PATH: file not found at resolved path ${resolved}` +
-        (candidates.length > 1 ? `. Candidates checked: ${candidates.join('; ')}` : '')
+      `FIREBASE_SERVICE_ACCOUNT_PATH: file not found at ${resolved}` +
+        (candidates.length > 1 ? ` (checked: ${candidates.join('; ')})` : '')
     );
     return null;
   }
@@ -88,25 +96,13 @@ function loadCredentialFromPath() {
   try {
     fileContents = fs.readFileSync(resolved, 'utf8');
   } catch (err) {
-    logger.error(`FIREBASE_SERVICE_ACCOUNT_PATH: failed to read file ${resolved}: ${err.message}`);
-    throw err;
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(fileContents);
-  } catch (err) {
-    logger.error(`FIREBASE_SERVICE_ACCOUNT_PATH: invalid JSON in ${resolved} — ${err.message}`);
-    throw err;
-  }
-
-  if (!validateServiceAccountShape(parsed, `FIREBASE_SERVICE_ACCOUNT_PATH (${resolved})`)) {
+    logger.error(`FIREBASE_SERVICE_ACCOUNT_PATH: read failed: ${err.message}`);
     return null;
   }
 
-  logger.info('Firebase Admin credential source: FIREBASE_SERVICE_ACCOUNT_PATH (file)');
-  logger.info(`Firebase Admin resolved service account path: ${resolved}`);
-  return parsed;
+  return parseServiceAccountFromString(fileContents, `FIREBASE_SERVICE_ACCOUNT_PATH (${resolved})`, {
+    throwOnError: false,
+  });
 }
 
 function loadCredentialFromGoogleApplicationCredentials() {
@@ -118,8 +114,8 @@ function loadCredentialFromGoogleApplicationCredentials() {
 
   if (!fs.existsSync(resolved)) {
     logger.error(
-      `GOOGLE_APPLICATION_CREDENTIALS: file not found at resolved path ${resolved}` +
-        (candidates.length > 1 ? `. Candidates checked: ${candidates.join('; ')}` : '')
+      `GOOGLE_APPLICATION_CREDENTIALS: file not found at ${resolved}` +
+        (candidates.length > 1 ? ` (checked: ${candidates.join('; ')})` : '')
     );
     return null;
   }
@@ -128,25 +124,13 @@ function loadCredentialFromGoogleApplicationCredentials() {
   try {
     fileContents = fs.readFileSync(resolved, 'utf8');
   } catch (err) {
-    logger.error(`GOOGLE_APPLICATION_CREDENTIALS: failed to read file ${resolved}: ${err.message}`);
-    throw err;
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(fileContents);
-  } catch (err) {
-    logger.error(`GOOGLE_APPLICATION_CREDENTIALS: invalid JSON in ${resolved} — ${err.message}`);
-    throw err;
-  }
-
-  if (!validateServiceAccountShape(parsed, `GOOGLE_APPLICATION_CREDENTIALS (${resolved})`)) {
+    logger.error(`GOOGLE_APPLICATION_CREDENTIALS: read failed: ${err.message}`);
     return null;
   }
 
-  logger.info('Firebase Admin credential source: GOOGLE_APPLICATION_CREDENTIALS (file)');
-  logger.info(`Firebase Admin resolved GOOGLE_APPLICATION_CREDENTIALS path: ${resolved}`);
-  return parsed;
+  return parseServiceAccountFromString(fileContents, `GOOGLE_APPLICATION_CREDENTIALS (${resolved})`, {
+    throwOnError: false,
+  });
 }
 
 function initializeWithCredential(credential, sourceLabel) {
@@ -160,19 +144,13 @@ function initializeWithCredential(credential, sourceLabel) {
     credential: admin.credential.cert(credential),
   });
   initialized = true;
-  logger.info(`Firebase Admin initialized successfully (${sourceLabel})`);
+  logger.info(`Firebase Admin initialized (${sourceLabel})`);
   return true;
 }
 
 /**
- * Initialize Firebase Admin once (credential resolution does not depend on process.cwd()).
- *
- * Order (production hosts like Render should use 1 — no key file on disk):
- * 1) FIREBASE_SERVICE_ACCOUNT_JSON
- * 2) FIREBASE_SERVICE_ACCOUNT_PATH
- * 3) GOOGLE_APPLICATION_CREDENTIALS (JSON key file)
- *
- * Only calls admin.initializeApp when admin.apps.length === 0.
+ * Production: only FIREBASE_SERVICE_ACCOUNT_JSON; throws on missing/invalid.
+ * Development: JSON env, then file-based credentials; returns false if unset.
  */
 function initFirebaseAdmin() {
   if (initialized && admin.apps.length > 0) {
@@ -184,30 +162,42 @@ function initFirebaseAdmin() {
     return true;
   }
 
-  try {
-    const fromEnvJson = loadCredentialFromEnvJson();
-    if (fromEnvJson) {
-      return initializeWithCredential(fromEnvJson, 'env JSON');
-    }
+  const isProd = process.env.NODE_ENV === 'production';
 
-    const fromPath = loadCredentialFromPath();
-    if (fromPath) {
-      return initializeWithCredential(fromPath, 'FIREBASE_SERVICE_ACCOUNT_PATH');
-    }
-
-    const fromGac = loadCredentialFromGoogleApplicationCredentials();
-    if (fromGac) {
-      return initializeWithCredential(fromGac, 'GOOGLE_APPLICATION_CREDENTIALS');
-    }
-
-    logger.warn(
-      'Firebase Admin not configured — set FIREBASE_SERVICE_ACCOUNT_JSON, FIREBASE_SERVICE_ACCOUNT_PATH, or GOOGLE_APPLICATION_CREDENTIALS. Firebase Console → Project settings → Service accounts → Generate new private key.'
+  if (isProd) {
+    const cred = parseServiceAccountFromString(
+      process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
+      'FIREBASE_SERVICE_ACCOUNT_JSON',
+      { throwOnError: true }
     );
-    return false;
-  } catch (err) {
-    logger.error('Firebase Admin initialization failed', { message: err.message });
-    throw err;
+    logger.info('Firebase Admin credential source: FIREBASE_SERVICE_ACCOUNT_JSON');
+    return initializeWithCredential(cred, 'FIREBASE_SERVICE_ACCOUNT_JSON');
   }
+
+  const fromEnv = parseServiceAccountFromString(
+    process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
+    'FIREBASE_SERVICE_ACCOUNT_JSON',
+    { throwOnError: false }
+  );
+  if (fromEnv) {
+    logger.info('Firebase Admin credential source: FIREBASE_SERVICE_ACCOUNT_JSON (environment)');
+    return initializeWithCredential(fromEnv, 'FIREBASE_SERVICE_ACCOUNT_JSON');
+  }
+
+  const fromPath = loadCredentialFromPath();
+  if (fromPath) {
+    return initializeWithCredential(fromPath, 'FIREBASE_SERVICE_ACCOUNT_PATH');
+  }
+
+  const fromGac = loadCredentialFromGoogleApplicationCredentials();
+  if (fromGac) {
+    return initializeWithCredential(fromGac, 'GOOGLE_APPLICATION_CREDENTIALS');
+  }
+
+  logger.warn(
+    'Firebase Admin not configured — set FIREBASE_SERVICE_ACCOUNT_JSON or (dev only) PATH / GOOGLE_APPLICATION_CREDENTIALS'
+  );
+  return false;
 }
 
 function getFirebaseAuth() {

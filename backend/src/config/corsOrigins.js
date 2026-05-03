@@ -1,30 +1,17 @@
 const logger = require('../utils/logger');
+const { parseAllowedOrigins } = require('./validateEnv');
 
 /**
- * Parse comma-separated origins from env (no trailing spaces).
- * @param {string | undefined} value
- * @returns {string[]}
- */
-function splitOrigins(value) {
-  if (!value || typeof value !== 'string') return [];
-  return value.split(',').map((o) => o.trim()).filter(Boolean);
-}
-
-/**
- * Allowed browser origins for CORS. Built only from environment variables so nothing
- * is hardcoded (works on Render, local .env supplies localhost values).
- *
- * Uses ALLOWED_ORIGINS and FRONTEND_URL (legacy); both may be comma-separated lists.
+ * CORS allowlist from ALLOWED_ORIGINS only (comma-separated). No FRONTEND_URL merge.
  */
 function getAllowedOrigins() {
-  const list = [...splitOrigins(process.env.ALLOWED_ORIGINS), ...splitOrigins(process.env.FRONTEND_URL)];
-  const unique = [...new Set(list)];
+  const unique = [...new Set(parseAllowedOrigins(process.env.ALLOWED_ORIGINS))];
   if (unique.length === 0) {
     logger.warn(
-      'CORS allowlist is empty — set ALLOWED_ORIGINS and/or FRONTEND_URL (comma-separated origins). Browser API calls will fail until configured.'
+      'ALLOWED_ORIGINS is empty — browser requests with an Origin header will be rejected by CORS until set.'
     );
   }
   return unique;
 }
 
-module.exports = { getAllowedOrigins, splitOrigins };
+module.exports = { getAllowedOrigins, splitOrigins: parseAllowedOrigins };

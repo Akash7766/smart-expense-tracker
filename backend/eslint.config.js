@@ -6,7 +6,7 @@ module.exports = [
   },
   js.configs.recommended,
   {
-    files: ['src/**/*.js'],
+    files: ['src/**/*.js', 'server.js'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'commonjs',

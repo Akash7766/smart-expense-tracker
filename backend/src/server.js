@@ -1,10 +1,12 @@
 require('dotenv').config();
+const logger = require('./utils/logger');
+const { validateEnv } = require('./config/validateEnv');
+
+validateEnv();
+
 const app = require('./app');
 const connectDB = require('./config/db');
-const logger = require('./utils/logger');
 const { initFirebaseAdmin } = require('./config/firebaseAdmin');
-
-const PORT = Number.parseInt(process.env.PORT, 10) || 5000;
 
 process.on('unhandledRejection', (reason) => {
   logger.error('Unhandled promise rejection', {
@@ -21,16 +23,27 @@ process.on('uncaughtException', (err) => {
 const startServer = async () => {
   try {
     await connectDB();
+
     try {
-      const firebaseReady = initFirebaseAdmin();
-      if (!firebaseReady) {
-        logger.warn('Protected APIs (/api/expenses, /api/insights) return 503 until Firebase Admin credentials are configured — see backend/.env.example');
+      const isProd = process.env.NODE_ENV === 'production';
+      if (isProd) {
+        initFirebaseAdmin();
+      } else {
+        const ok = initFirebaseAdmin();
+        if (!ok) {
+          logger.warn('Protected APIs (/api/expenses, /api/insights) return 503 until Firebase Admin is configured');
+        }
       }
-    } catch (firebaseErr) {
-      logger.error('Firebase Admin failed to initialize', { message: firebaseErr.message });
+    } catch (err) {
+      logger.error(`Firebase Admin: ${err.message}`);
+      process.exit(1);
     }
-    app.listen(PORT, () => {
-      logger.info(`Server listening on port ${PORT} [${process.env.NODE_ENV || 'undefined'}]`);
+
+    const isProd = process.env.NODE_ENV === 'production';
+    const port = isProd ? process.env.PORT : process.env.PORT || 5000;
+
+    app.listen(port, () => {
+      logger.info(`Server running on port ${port}`);
     });
   } catch (error) {
     logger.error('Failed to start server:', error);
